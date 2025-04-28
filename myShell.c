@@ -5,6 +5,7 @@
 #include <sys/wait.h>
 #include <string.h>
 #include <fcntl.h>
+#include <pwd.h>
 
 #define MAX_LINE 80    // 最大命令行字符数
 #define MAX_ARGS 10    // 最大参数数目
@@ -13,8 +14,8 @@
 #define BLUE "\e[1;34m"
 #define YELLOW "\e[1;33m"
 #define WHITE "\e[1;37m"
-#define RED "\e[0;31m"
-#define GREEN "\e[0;32m"
+#define RED "\e[1;31m"
+#define GREEN "\e[1;32m"
 
 void execute_command(char *args[], int input_fd, int output_fd) {
     pid_t pid = fork();
@@ -47,24 +48,42 @@ void execute_command(char *args[], int input_fd, int output_fd) {
     }
 }
 
+void display_hello() {
+    printf("Welcome to lhy's Shell!\n");
+    printf("This is the final project of UNIX at BUAA.\n");
+    printf("Author: Haoyu Luo\n");
+    printf("Student ID: 23373112\n");
+    printf(" _      _   _ __   __        ____   _   _  _____  _      _ \n");   
+    printf("| |    | | | |\\ \\ / /       / ___| | | | || ____|| |    | |\n");
+    printf("| |    | |_| | \\ V /  _____ \\___ \\ | |_| ||  _|  | |    | |    \n");
+    printf("| |___ |  _  |  | |  |_____| ___) ||  _  || |___ | |___ | |___ \n");
+    printf("|_____||_| |_|  |_|         |____/ |_| |_||_____||_____||_____|\n");
+}
+
 void display_prefix() {
-    char *path = getenv("PATH");
     char *home = getenv("HOME");
     char *current_dir = getcwd(NULL, 0);
     if (current_dir == NULL) {
         perror("getcwd");
         exit(1);
     }
-    char *dir = strstr(current_dir, home);
-    if (dir != NULL) {
-        // 如果当前目录在家目录下，则替换为 ~
-        dir[0] = '~';
-    } else {
-        // 否则，显示完整路径
-        free(current_dir);
-        current_dir = getcwd(NULL, 0);
+    struct passwd *pwd = getpwuid(getuid());
+    char *hostname = (char *)malloc(MAX_LINE);
+    if (gethostname(hostname, MAX_LINE) == -1) {
+        perror("gethostname");
+        exit(1);
     }
-    printf(BLUE "lhy@myShell:" YELLOW "%s" WHITE "$ ", current_dir);
+    hostname[strcspn(hostname, ".")] = 0;
+    hostname[strcspn(hostname, "\n")] = 0;
+    char *dir = strstr(current_dir, home);
+    char *prefix_dir = (char *)malloc(strlen(home) + 1);
+    if (dir != NULL) {
+        prefix_dir[0] = '~';
+        strcpy(prefix_dir + 1, dir + strlen(home));
+    } else {
+        prefix_dir = current_dir;
+    }
+    printf(RED "[lhy's Shell] " BLUE "%s@%s:" YELLOW "%s" WHITE "$ ", pwd->pw_name, hostname, prefix_dir);
     free(current_dir);
 }
 
@@ -72,10 +91,12 @@ int main() {
     char line[MAX_LINE];    // 存储输入的命令行
     char *args[MAX_ARGS];   // 命令行参数列表
 
+    display_hello();
+
     while (1) {
         display_prefix();
-        fflush(stdout);
-
+        
+fflush(stdout);
         // 读取输入命令行
         if (!fgets(line, MAX_LINE, stdin)) {
             break;
