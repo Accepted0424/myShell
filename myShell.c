@@ -7,8 +7,11 @@
 #include <fcntl.h>
 #include <pwd.h>
 
-#define MAX_LINE 80    // 最大命令行字符数
-#define MAX_ARGS 10    // 最大参数数目
+#include <readline/readline.h>
+#include <readline/history.h>
+
+#define MAX_LINE 80
+#define MAX_ARGS 10
 
 // color define
 #define BLUE "\e[1;34m"
@@ -17,18 +20,13 @@
 #define RED "\e[1;31m"
 #define GREEN "\e[1;32m"
 
-#define EXECUTE_BUILTIN_COMMAND(func, args) \
-    do {                                    \
-        func(args);                         \
-    } while (0);
-
 void shell_interact();
 void shell_script();
 void execute_command(char *args[], int input_fd, int output_fd);
 void execute_out_command(char *args[], int input_fd, int output_fd);
 void execute_builtin_command(char *args[], int input_fd, int output_fd);
 void display_hello();
-void display_prefix();
+char *update_prefix();
 
 const char *builtins[] = {
     "cd",
@@ -60,20 +58,37 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+// builtin command
+void cd(char *args[]) {
+    if (args[1] == NULL) {
+        fprintf(stderr, "cd: missing argument\n");
+        return;
+    }
+    if (chdir(args[1]) != 0) {
+        perror("cd");
+    }
+}
+
+void exit_lsh(char *args[]) {
+    exit(0);
+}
+
 void shell_interact() {
-    char line[MAX_LINE];    // 存储输入的命令行
+    char *line;    // 存储输入的命令行
     char *args[MAX_ARGS];   // 命令行参数列表
 
     while (1) {
-        display_prefix();
         fflush(stdout);
-        // 读取输入命令行
-        if (!fgets(line, MAX_LINE, stdin)) {
+        char *prefix = update_prefix();
+        line = readline(prefix);
+
+        if (!line) {
             break;
         }
 
-        // 移除末尾的换行符
-        line[strcspn(line, "\n")] = 0;
+        if (line[0] != '\0') {
+            add_history(line); // 保存历史，支持上下键翻历史命令
+        }
 
         // 初始化参数列表
         int i;
@@ -122,6 +137,28 @@ void shell_interact() {
     }
 }
 
+void shell_script(char *filename) {
+    printf("Received Script. Opening %s", filename);
+	FILE *fptr;
+	char line[200];
+	char **args;
+	fptr = fopen(filename, "r");
+	if (fptr == NULL)
+	{
+		printf("\nUnable to open file.");
+	}
+	else
+	{
+		printf("\nFile Opened. Parsing. Parsed commands displayed first.");
+		while(fgets(line, sizeof(line), fptr)!= NULL)
+		{
+			printf("\n%s", line);
+		}
+	}
+	free(args);
+	fclose(fptr);
+}
+
 int isBuiltin(char *func_name) {
     for (int i = 0; builtins[i] != NULL; i++) {
         if (strcmp(func_name, builtins[i]) == 0) {
@@ -132,48 +169,49 @@ int isBuiltin(char *func_name) {
 }
 
 void execute_command(char *args[], int input_fd, int output_fd) {
-    // 检查是否是内置命令
-    if (isBuiltin(args[0])) {
-        execute_builtin_command(args, input_fd, output_fd);
-        return;
-    } else {
-        execute_out_command(args, input_fd, output_fd);
-    }
-}
-
-void execute_out_command(char *args[], int input_fd, int output_fd) {
     pid_t pid = fork();
     if (pid == 0) {
-        // Child process
-
-        // 如果存在输入重定向，则将输入重定向到指定文件描述符
-        if (input_fd != 0) {
-            dup2(input_fd, 0);
-            close(input_fd);
+        if (isBuiltin(args[0])) {
+            execute_builtin_command(args, input_fd, output_fd);
+            return;
+        } else {
+            execute_out_command(args, input_fd, output_fd);
         }
-
-        // 如果存在输出重定向，则将输出重定向到指定文件描述符
-        if (output_fd != 1) {
-            dup2(output_fd, 1);
-            close(output_fd);
-        }
-
-        // 执行外部命令
-        execvp(args[0], args);
-        perror("execvp");
-        exit(1);
     } else if (pid > 0) {
-        // Parent process
         wait(NULL);
     } else {
-        // Fork failed
         perror("fork");
         exit(1);
     }
 }
 
+void execute_out_command(char *args[], int input_fd, int output_fd) {
+    // 如果存在输入重定向，则将输入重定向到指定文件描述符
+    if (input_fd != 0) {
+        dup2(input_fd, 0);
+        close(input_fd);
+    }
+
+    // 如果存在输出重定向，则将输出重定向到指定文件描述符
+    if (output_fd != 1) {
+        dup2(output_fd, 1);
+        close(output_fd);
+    }
+
+    // 执行外部命令
+    execvp(args[0], args);
+    perror("execvp");
+    exit(1);
+}
+
 void execute_builtin_command(char *args[], int input_fd, int output_fd) {
-    EXECUTE_BUILTIN_COMMAND(args[0], args);
+    if (strcmp(args[0], "cd") == 0) {
+        cd(args);
+    } else if (strcmp(args[0], "exit") == 0) {
+        exit_lsh(args);
+    } else {
+        fprintf(stderr, "%s: command not found\n", args[0]);
+    }
 }
 
 void display_hello() {
@@ -188,7 +226,7 @@ void display_hello() {
     printf("|_____||_| |_|  |_|         |____/ |_| |_||_____||_____||_____|\n\n");
 }
 
-void display_prefix() {
+char *update_prefix() {
     char *home = getenv("HOME");
     char *current_dir = getcwd(NULL, 0);
     if (current_dir == NULL) {
@@ -211,30 +249,7 @@ void display_prefix() {
     } else {
         prefix_dir = current_dir;
     }
-    printf(RED "[lhy's Shell] " BLUE "%s@%s:" YELLOW "%s" WHITE "$ ", pwd->pw_name, hostname, prefix_dir);
-    free(current_dir);
-}
-
-// builtin command
-void cd(char *args[]) {
-    if (args[1] == NULL) {
-        fprintf(stderr, "cd: missing argument\n");
-        return;
-    }
-    if (chdir(args[1]) != 0) {
-        perror("cd");
-    }
-}
-
-void exit_lsh(char *args[]) {
-    exit(0);
-}
-
-void echo(char *args[]) {
-    int i = 1;
-    while (args[i] != NULL) {
-        printf("%s ", args[i]);
-        i++;
-    }
-    printf("\n");
+    char buf[1024];
+    snprintf(buf, sizeof(buf), RED "[lhy's Shell] " BLUE "%s@%s:" YELLOW "%s" WHITE "$ ", pwd->pw_name, hostname, prefix_dir);
+    return strdup(buf);
 }
