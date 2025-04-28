@@ -20,19 +20,14 @@
 #define RED "\e[1;31m"
 #define GREEN "\e[1;32m"
 
-void shell_interact();
-void shell_script();
-void execute_command(char *args[], int input_fd, int output_fd);
-void execute_out_command(char *args[], int input_fd, int output_fd);
-void execute_builtin_command(char *args[], int input_fd, int output_fd);
-void display_hello();
-char *update_prefix();
-
 const char *builtins[] = {
     "cd",
     "exit",
     NULL 
 };
+
+void shell_interact();
+void shell_script();
 
 int main(int argc, char *argv[]) {
     display_hello();
@@ -75,7 +70,6 @@ void exit_lsh(char *args[]) {
 
 void shell_interact() {
     char *line;    // 存储输入的命令行
-    char *args[MAX_ARGS];   // 命令行参数列表
 
     while (1) {
         fflush(stdout);
@@ -90,51 +84,8 @@ void shell_interact() {
             add_history(line); // 保存历史，支持上下键翻历史命令
         }
 
-        // 初始化参数列表
-        int i;
-        for (i = 0; i < MAX_ARGS; i++) {
-            args[i] = NULL;
-        }
-
         // 解析命令行参数
-        char *token = strtok(line, " ");
-        i = 0;
-        while (token != NULL && i < MAX_ARGS - 1) {
-            args[i++] = token;
-            token = strtok(NULL, " ");
-        }
-        args[i] = NULL;
-
-        // 检查是否存在管道操作符 "|"
-        char *pipe_token = strchr(line, '|');
-        if (pipe_token != NULL) {
-            // 建立管道
-            int pipefd[2];
-            if (pipe(pipefd) == -1) {
-                perror("pipe");
-                exit(1);
-            }
-
-            // 解析第一个命令和第二个命令
-            *pipe_token = '\0';
-            char *first_command = args[0];
-            char *second_command = pipe_token + 1;
-
-            // 执行第一个命令，输出重定向到管道写入端
-            execute_command(args, 0, pipefd[1]);
-
-            // 执行第二个命令，输入从管道读取端获取
-            args[0] = second_command;
-            execute_command(args, pipefd[0], 1);
-
-            // 关闭管道
-            close(pipefd[0]);
-            close(pipefd[1]);
-        } else {
-            // 普通命令，直接执行
-            execute_command(args, 0, 1);
-        }
-    }
+        execute(line);
 }
 
 void shell_script(char *filename) {
@@ -168,20 +119,67 @@ int isBuiltin(char *func_name) {
     return 0;
 }
 
+int parse(char *line, char *args[]) {
+    int cnt = 0;
+    char *token = strtok(line, " ");
+        int i = 0;
+        while (token != NULL && i < MAX_ARGS - 1) {
+            cnt++;
+            args[i++] = token;
+            token = strtok(NULL, " ");
+        }
+        args[i] = NULL;
+    return cnt;
+}
+
 void execute_command(char *args[], int input_fd, int output_fd) {
     pid_t pid = fork();
     if (pid == 0) {
-        if (isBuiltin(args[0])) {
-            execute_builtin_command(args, input_fd, output_fd);
-            return;
-        } else {
-            execute_out_command(args, input_fd, output_fd);
+        if (input_fd != 0) { 
+            dup2(input_fd, 0);
+            close(input_fd);
         }
-    } else if (pid > 0) {
-        wait(NULL);
-    } else {
-        perror("fork");
+        if (output_fd != 1) {
+            dup2(output_fd, 1);
+            close(output_fd);
+        }
+        execvp(args[0], args);
+        perror("execvp failed");
         exit(1);
+    } else {
+        wait(NULL)
+    }
+}
+
+void execute(char *line) {
+    char *args[MAX_ARGS];
+    char *args_copy = args;
+    int argc = parse(line, args);
+
+    int pipefd[2 * (argc - 1)];
+    int pipe_cnt = 0;
+
+    // cmd1 | cmd2 | cmd3 | cmd4
+    //     0\1    2\3    4\5
+    for (int i = 0; i < argc; ++i) {
+        if (strcmp(args[i], "|") == 0) {
+            args_copy[i] = NULL;
+            pipe_cnt++;
+            if (pipe(pipefd + (pipe_cnt - 1) * 2) == -1) {
+                perror("pipe");
+                exit(1);
+            }
+            if (pipe_cnt == 1) execute_command(args, 0, pipefd[(pipe_cnt - 1) * 2 + 1]);
+            else execute_command(args, pipefd[(pipe_cnt - 2) * 2], pipefd[(pipe_cnt - 1) * 2 + 1]);
+            args = args_copy + i;
+        }
+    }
+    // 执行最后一个命令，输入重定向自前一个管道，输出重定向到标准输出
+    execute_command(args, pipefd[(pipe_cnt - 1) * 2], 1);
+
+    // 等待所有子进程完成
+    for (int i = 0; i < 2 * pipe_cnt; i++) {
+        close(pipefd[i]);
     }
 }
 
