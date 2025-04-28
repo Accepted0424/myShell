@@ -9,6 +9,13 @@
 #define MAX_LINE 80    // 最大命令行字符数
 #define MAX_ARGS 10    // 最大参数数目
 
+// color define
+#define BLUE "\e[1;34m"
+#define YELLOW "\e[1;33m"
+#define WHITE "\e[1;37m"
+#define RED "\e[0;31m"
+#define GREEN "\e[0;32m"
+
 void execute_command(char *args[], int input_fd, int output_fd) {
     pid_t pid = fork();
     if (pid == 0) {
@@ -40,13 +47,33 @@ void execute_command(char *args[], int input_fd, int output_fd) {
     }
 }
 
+void display_prefix() {
+    char *path = getenv("PATH");
+    char *home = getenv("HOME");
+    char *current_dir = getcwd(NULL, 0);
+    if (current_dir == NULL) {
+        perror("getcwd");
+        exit(1);
+    }
+    char *dir = strstr(current_dir, home);
+    if (dir != NULL) {
+        // 如果当前目录在家目录下，则替换为 ~
+        dir[0] = '~';
+    } else {
+        // 否则，显示完整路径
+        free(current_dir);
+        current_dir = getcwd(NULL, 0);
+    }
+    printf(BLUE "lhy@myShell:" YELLOW "%s" WHITE "$ ", current_dir);
+    free(current_dir);
+}
+
 int main() {
     char line[MAX_LINE];    // 存储输入的命令行
     char *args[MAX_ARGS];   // 命令行参数列表
-    int should_run = 1;     // 控制循环结束的标志
 
-    while (should_run) {
-        printf("lhy@myShell$ ");
+    while (1) {
+        display_prefix();
         fflush(stdout);
 
         // 读取输入命令行
