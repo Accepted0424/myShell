@@ -12,6 +12,7 @@
 
 #define MAX_LINE 80
 #define MAX_ARGS 10
+#define MAX_PIPE 10
 
 // color define
 #define BLUE "\e[1;34m"
@@ -23,11 +24,16 @@
 const char *builtins[] = {
     "cd",
     "exit",
-    NULL 
+    NULL
 };
 
 void shell_interact();
-void shell_script();
+
+void shell_script(char *filename);
+
+void display_hello();
+
+char *update_prefix();
 
 int main(int argc, char *argv[]) {
     display_hello();
@@ -44,7 +50,6 @@ int main(int argc, char *argv[]) {
         // 重定向标准输入到脚本文件
         dup2(fileno(file), STDIN_FILENO);
         fclose(file);
-        shell_script();
     } else {
         fprintf(stderr, "Usage: %s [script_file]\n", argv[0]);
         exit(1);
@@ -54,7 +59,7 @@ int main(int argc, char *argv[]) {
 }
 
 // builtin command
-void cd(char *args[]) {
+void builtin_cd(char *args[]) {
     if (args[1] == NULL) {
         fprintf(stderr, "cd: missing argument\n");
         return;
@@ -64,12 +69,97 @@ void cd(char *args[]) {
     }
 }
 
-void exit_lsh(char *args[]) {
+void builtin_exit() {
+    printf("exit lhy's shell, see you again.\n");
     exit(0);
 }
 
+int parse(char *line, char *args[]) {
+    int cnt = 0;
+    char *token = strtok(line, " ");
+    int i = 0;
+    while (token != NULL && i < MAX_ARGS - 1) {
+        cnt++;
+        args[i++] = token;
+        token = strtok(NULL, " ");
+    }
+    args[i] = NULL;
+    return cnt;
+}
+
+void execute_out_command(char *args[]) {
+    printf("%s\n", args[1]);
+    execvp(args[0], args);
+    perror("execvp");
+    printf("last sub process end\n");
+    exit(1);
+}
+
+void execute_builtin_command(char *args[]) {
+    if (strcmp(args[0], "cd") == 0) {
+        builtin_cd(args);
+    } else if (strcmp(args[0], "exit") == 0) {
+        builtin_exit();
+    } else {
+        fprintf(stderr, "%s: command not found\n", args[0]);
+    }
+}
+
+int isBuiltin(const char *func_name) {
+    for (int i = 0; builtins[i] != NULL; i++) {
+        if (strcmp(func_name, builtins[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void execute(char *line) {
+    char *args[MAX_ARGS];
+    char **args_ptr = args;
+    int argc = parse(line, args);
+
+    int out_fd = -1;
+    int in_fd = -1;
+    for (int i = 0; i < argc; i++) {
+        if (strcmp(args[i], ">") == 0) {
+            out_fd = open(args[i + 1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            args[i] = NULL;
+        } else if (strcmp(args[i], ">>") == 0) {
+            out_fd = open(args[i + 1], O_WRONLY | O_CREAT | O_APPEND, 0644);
+            args[i] = NULL;
+        } else if (strcmp(args[i], "<") == 0) {
+            in_fd = open(args[i + 1], O_RDONLY);
+            args[i] = NULL;
+        }
+    }
+
+    if (isBuiltin(*args_ptr)) {
+        execute_builtin_command(args_ptr);
+    } else {
+        pid_t pid = fork();
+        if (pid == 0) {
+            if (in_fd != -1) {
+                dup2(in_fd, STDIN_FILENO);
+                close(in_fd);
+            }
+            if (out_fd != -1) {
+                dup2(out_fd, STDOUT_FILENO);
+                close(out_fd);
+            }
+            execvp(args[0], args);
+            perror("execvp");
+            exit(1);
+        } else {
+            wait(NULL);
+            if (in_fd != -1) close(in_fd);
+            if (out_fd != -1) close(out_fd);
+        }
+    }
+}
+
 void shell_interact() {
-    char *line;    // 存储输入的命令行
+    char *line; // 存储输入的命令行
 
     while (1) {
         fflush(stdout);
@@ -86,130 +176,25 @@ void shell_interact() {
 
         // 解析命令行参数
         execute(line);
+    }
 }
 
 void shell_script(char *filename) {
     printf("Received Script. Opening %s", filename);
-	FILE *fptr;
-	char line[200];
-	char **args;
-	fptr = fopen(filename, "r");
-	if (fptr == NULL)
-	{
-		printf("\nUnable to open file.");
-	}
-	else
-	{
-		printf("\nFile Opened. Parsing. Parsed commands displayed first.");
-		while(fgets(line, sizeof(line), fptr)!= NULL)
-		{
-			printf("\n%s", line);
-		}
-	}
-	free(args);
-	fclose(fptr);
-}
-
-int isBuiltin(char *func_name) {
-    for (int i = 0; builtins[i] != NULL; i++) {
-        if (strcmp(func_name, builtins[i]) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-int parse(char *line, char *args[]) {
-    int cnt = 0;
-    char *token = strtok(line, " ");
-        int i = 0;
-        while (token != NULL && i < MAX_ARGS - 1) {
-            cnt++;
-            args[i++] = token;
-            token = strtok(NULL, " ");
-        }
-        args[i] = NULL;
-    return cnt;
-}
-
-void execute_command(char *args[], int input_fd, int output_fd) {
-    pid_t pid = fork();
-    if (pid == 0) {
-        if (input_fd != 0) { 
-            dup2(input_fd, 0);
-            close(input_fd);
-        }
-        if (output_fd != 1) {
-            dup2(output_fd, 1);
-            close(output_fd);
-        }
-        execvp(args[0], args);
-        perror("execvp failed");
-        exit(1);
+    FILE *fptr;
+    char line[200];
+    char **args;
+    fptr = fopen(filename, "r");
+    if (fptr == NULL) {
+        printf("\nUnable to open file.");
     } else {
-        wait(NULL)
-    }
-}
-
-void execute(char *line) {
-    char *args[MAX_ARGS];
-    char *args_copy = args;
-    int argc = parse(line, args);
-
-    int pipefd[2 * (argc - 1)];
-    int pipe_cnt = 0;
-
-    // cmd1 | cmd2 | cmd3 | cmd4
-    //     0\1    2\3    4\5
-    for (int i = 0; i < argc; ++i) {
-        if (strcmp(args[i], "|") == 0) {
-            args_copy[i] = NULL;
-            pipe_cnt++;
-            if (pipe(pipefd + (pipe_cnt - 1) * 2) == -1) {
-                perror("pipe");
-                exit(1);
-            }
-            if (pipe_cnt == 1) execute_command(args, 0, pipefd[(pipe_cnt - 1) * 2 + 1]);
-            else execute_command(args, pipefd[(pipe_cnt - 2) * 2], pipefd[(pipe_cnt - 1) * 2 + 1]);
-            args = args_copy + i;
+        printf("\nFile Opened. Parsing. Parsed commands displayed first.");
+        while (fgets(line, sizeof(line), fptr) != NULL) {
+            printf("\n%s", line);
         }
     }
-    // 执行最后一个命令，输入重定向自前一个管道，输出重定向到标准输出
-    execute_command(args, pipefd[(pipe_cnt - 1) * 2], 1);
-
-    // 等待所有子进程完成
-    for (int i = 0; i < 2 * pipe_cnt; i++) {
-        close(pipefd[i]);
-    }
-}
-
-void execute_out_command(char *args[], int input_fd, int output_fd) {
-    // 如果存在输入重定向，则将输入重定向到指定文件描述符
-    if (input_fd != 0) {
-        dup2(input_fd, 0);
-        close(input_fd);
-    }
-
-    // 如果存在输出重定向，则将输出重定向到指定文件描述符
-    if (output_fd != 1) {
-        dup2(output_fd, 1);
-        close(output_fd);
-    }
-
-    // 执行外部命令
-    execvp(args[0], args);
-    perror("execvp");
-    exit(1);
-}
-
-void execute_builtin_command(char *args[], int input_fd, int output_fd) {
-    if (strcmp(args[0], "cd") == 0) {
-        cd(args);
-    } else if (strcmp(args[0], "exit") == 0) {
-        exit_lsh(args);
-    } else {
-        fprintf(stderr, "%s: command not found\n", args[0]);
-    }
+    free(args);
+    fclose(fptr);
 }
 
 void display_hello() {
@@ -217,7 +202,7 @@ void display_hello() {
     printf("This is the final project of UNIX at BUAA.\n");
     printf("Author: Haoyu Luo\n");
     printf("Student ID: 23373112\n");
-    printf(" _      _   _ __   __        ____   _   _  _____  _      _ \n");   
+    printf(" _      _   _ __   __        ____   _   _  _____  _      _ \n");
     printf("| |    | | | |\\ \\ / /       / ___| | | | || ____|| |    | |\n");
     printf("| |    | |_| | \\ V /  _____ \\___ \\ | |_| ||  _|  | |    | |    \n");
     printf("| |___ |  _  |  | |  |_____| ___) ||  _  || |___ | |___ | |___ \n");
@@ -232,7 +217,7 @@ char *update_prefix() {
         exit(1);
     }
     struct passwd *pwd = getpwuid(getuid());
-    char *hostname = (char *)malloc(MAX_LINE);
+    char *hostname = (char *) malloc(MAX_LINE);
     if (gethostname(hostname, MAX_LINE) == -1) {
         perror("gethostname");
         exit(1);
@@ -240,7 +225,7 @@ char *update_prefix() {
     hostname[strcspn(hostname, ".")] = 0;
     hostname[strcspn(hostname, "\n")] = 0;
     char *dir = strstr(current_dir, home);
-    char *prefix_dir = (char *)malloc(strlen(home) + 1);
+    char *prefix_dir = (char *) malloc(strlen(home) + 1);
     if (dir != NULL) {
         prefix_dir[0] = '~';
         strcpy(prefix_dir + 1, dir + strlen(home));
@@ -248,6 +233,7 @@ char *update_prefix() {
         prefix_dir = current_dir;
     }
     char buf[1024];
-    snprintf(buf, sizeof(buf), RED "[lhy's Shell] " BLUE "%s@%s:" YELLOW "%s" WHITE "$ ", pwd->pw_name, hostname, prefix_dir);
+    snprintf(buf, sizeof(buf), RED "[lhy's Shell] " BLUE "%s@%s:" YELLOW "%s" WHITE "$ ", pwd->pw_name, hostname,
+             prefix_dir);
     return strdup(buf);
 }
