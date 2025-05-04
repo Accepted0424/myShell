@@ -10,9 +10,8 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 
-#define MAX_LINE 80
+#define MAX_LINE 200
 #define MAX_ARGS 10
-#define MAX_PIPE 10
 
 // color define
 #define BLUE "\e[1;34m"
@@ -28,11 +27,8 @@ const char *builtins[] = {
 };
 
 void shell_interact();
-
 void shell_script(char *filename);
-
 void display_hello();
-
 char *update_prefix();
 
 int main(int argc, char *argv[]) {
@@ -41,15 +37,7 @@ int main(int argc, char *argv[]) {
         // 交互模式
         shell_interact();
     } else if (argc == 2) {
-        // 脚本模式
-        FILE *file = fopen(argv[1], "r");
-        if (file == NULL) {
-            perror("fopen");
-            exit(1);
-        }
-        // 重定向标准输入到脚本文件
-        dup2(fileno(file), STDIN_FILENO);
-        fclose(file);
+        shell_script(argv[1]);
     } else {
         fprintf(stderr, "Usage: %s [script_file]\n", argv[0]);
         exit(1);
@@ -238,20 +226,16 @@ void shell_interact() {
 }
 
 void shell_script(char *filename) {
-    printf("Received Script. Opening %s", filename);
-    FILE *fptr;
-    char line[200];
-    char **args;
-    fptr = fopen(filename, "r");
+    char line[MAX_LINE];
+    FILE *fptr = fopen(filename, "r");
     if (fptr == NULL) {
-        printf("\nUnable to open file.");
+        perror("fopen");
+        exit(1);
     } else {
-        printf("\nFile Opened. Parsing. Parsed commands displayed first.");
         while (fgets(line, sizeof(line), fptr) != NULL) {
-            printf("\n%s", line);
+            execute(line);
         }
     }
-    free(args);
     fclose(fptr);
 }
 
