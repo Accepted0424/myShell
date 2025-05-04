@@ -88,7 +88,6 @@ int parse(char *line, char *args[]) {
 }
 
 void execute_out_command(char *args[]) {
-    printf("%s\n", args[1]);
     execvp(args[0], args);
     perror("execvp");
     printf("last sub process end\n");
@@ -119,10 +118,16 @@ void execute(char *line) {
     char **args_ptr = args;
     int argc = parse(line, args);
 
-    int out_fd = -1;
-    int in_fd = -1;
+    int pipe_cnt = 0;
+    int out_fd = STDOUT_FILENO;
+    int in_fd = STDIN_FILENO;
+
     for (int i = 0; i < argc; i++) {
-        if (strcmp(args[i], ">") == 0) {
+        if (strcmp(args[i], "|") == 0) {
+            args[i] = NULL;
+            pipe_cnt++;
+            args_ptr = args + i + 1;
+        } else if (strcmp(args[i], ">") == 0) {
             out_fd = open(args[i + 1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
             args[i] = NULL;
         } else if (strcmp(args[i], ">>") == 0) {
@@ -133,27 +138,80 @@ void execute(char *line) {
             args[i] = NULL;
         }
     }
+    if (pipe_cnt > 1) {
+        printf("Sorry, this shell is not support too many pipe\n");
+        exit(1);
+    } else if (pipe_cnt == 1) {
+        // 创建管道
+        int pipeFd[2];
+        int status;
 
-    if (isBuiltin(*args_ptr)) {
-        execute_builtin_command(args_ptr);
-    } else {
-        pid_t pid = fork();
-        if (pid == 0) {
-            if (in_fd != -1) {
+        if(pipe(pipeFd) == -1) {
+            perror("pipe");
+            exit(1);
+        }
+
+        pid_t pid1 = fork();
+        if (pid1 == 0) {
+            //重定向标准输出到管道的写端，向管道输出数据
+            dup2(pipeFd[1], STDOUT_FILENO);
+            if (in_fd != STDIN_FILENO) {
                 dup2(in_fd, STDIN_FILENO);
                 close(in_fd);
             }
-            if (out_fd != -1) {
-                dup2(out_fd, STDOUT_FILENO);
-                close(out_fd);
+            //关闭管道的读端
+            close(pipeFd[0]);
+            execute_out_command(args);
+            exit(0);
+        } else if (pid1 > 0) {
+            // 等待子进程结束
+            waitpid(pid1, &status, 0);
+            // 创建子进程
+            pid_t pid2 = fork();
+            if (pid2 == 0) {
+                //关闭管道的写端
+                close(pipeFd[1]);
+                //重定向标准输入到管道的读端，读取管道数据
+                dup2(pipeFd[0], STDIN_FILENO);
+                if (out_fd != STDOUT_FILENO) {
+                    dup2(out_fd, STDOUT_FILENO);
+                    close(out_fd);
+                }
+                execute_out_command(args_ptr);
+                exit(0);
+            } else if (pid2 > 0) {
+                // 父进程关闭管道
+                close(pipeFd[0]);
+                close(pipeFd[1]);
+                waitpid(pid2, &status, 0);
+            } else {
+                perror("fork");
+                exit(1);
             }
-            execvp(args[0], args);
-            perror("execvp");
-            exit(1);
         } else {
-            wait(NULL);
-            if (in_fd != -1) close(in_fd);
-            if (out_fd != -1) close(out_fd);
+            perror("fork");
+            exit(1);
+        }
+    } else {
+        if (isBuiltin(*args_ptr)) {
+            execute_builtin_command(args_ptr);
+        } else {
+            pid_t pid = fork();
+            if (pid == 0) {
+                if (in_fd != STDIN_FILENO) {
+                    dup2(in_fd, STDIN_FILENO);
+                    close(in_fd);
+                }
+                if (out_fd != STDOUT_FILENO) {
+                    dup2(out_fd, STDOUT_FILENO);
+                    close(out_fd);
+                }
+                execute_out_command(args_ptr);
+            } else {
+                wait(NULL);
+                if (in_fd != STDIN_FILENO) close(in_fd);
+                if (out_fd != STDOUT_FILENO) close(out_fd);
+            }
         }
     }
 }
