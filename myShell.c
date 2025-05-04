@@ -29,6 +29,7 @@ const char *builtins[] = {
 void shell_interact();
 void shell_script(char *filename);
 void display_hello();
+void display_bye();
 char *update_prefix();
 
 int main(int argc, char *argv[]) {
@@ -58,7 +59,7 @@ void builtin_cd(char *args[]) {
 }
 
 void builtin_exit() {
-    printf("exit lhy's shell, see you again.\n");
+    display_bye();
     exit(0);
 }
 
@@ -249,6 +250,15 @@ void display_hello() {
     printf("| |    | |_| | \\ V /  _____ \\___ \\ | |_| ||  _|  | |    | |    \n");
     printf("| |___ |  _  |  | |  |_____| ___) ||  _  || |___ | |___ | |___ \n");
     printf("|_____||_| |_|  |_|         |____/ |_| |_||_____||_____||_____|\n\n");
+}
+
+void display_bye() {
+    printf("  ____                    _  _                   _ \n");
+    printf(" / ___|  ___    ___    __| || |__   _   _   ___ | |\n");
+    printf("| |  _  / _ \\  / _ \\  / _` || '_ \\ | | | | / _ \\| |\n");
+    printf("| |_| || (_) || (_) || (_| || |_) || |_| ||  __/|_|\n");
+    printf(" \\____| \\___/  \\___/  \\__,_||_.__/  \\__, | \\___|(_)\n");
+    printf("                                    |___/      \n");
 }
 
 char *update_prefix() {
