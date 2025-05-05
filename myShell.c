@@ -33,9 +33,8 @@ void display_bye();
 char *update_prefix();
 
 int main(int argc, char *argv[]) {
-    display_hello();
     if (argc == 1) {
-        // 交互模式
+        display_hello();
         shell_interact();
     } else if (argc == 2) {
         shell_script(argv[1]);
